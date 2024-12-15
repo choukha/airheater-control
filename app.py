@@ -65,6 +65,7 @@ def login_page():
             time.sleep(1)
             st.rerun()
 
+
 def create_sidebar():
     """Create sidebar with controls and user info"""
     # User information
@@ -84,31 +85,60 @@ def create_sidebar():
     st.sidebar.header("Process Mode")
     if 'process_mode' not in st.session_state:
         st.session_state.process_mode = "simulator"
+    if 'mode_error' not in st.session_state:
+        st.session_state.mode_error = None
+
+    # Create mode selection buttons side by side
+    mode_cols = st.sidebar.columns(2)
     
-    mode = st.sidebar.radio(
-        "Select Mode",
-        ["simulator", "DAQ hardware"],
-        index=0 if st.session_state.process_mode == "simulator" else 1,
-        key="mode_selector"
-    )
-    
-    # Handle mode change
-    if mode != st.session_state.process_mode:
-        if mode == "DAQ hardware":
+    # Simulator button
+    with mode_cols[0]:
+        if st.button("📊 Simulator", type="primary" if st.session_state.process_mode == "simulator" else "secondary"):
+            st.session_state.process_mode = "simulator"
+            st.session_state.mode_error = None  # Clear any error when manually selecting simulator
+            st.rerun()
+
+    # DAQ button
+    with mode_cols[1]:
+        if st.button("🔧 DAQ Hardware", type="primary" if st.session_state.process_mode == "DAQ hardware" else "secondary"):
             try:
+                # Check for nidaqmx installation
+                import importlib
+                nidaqmx_spec = importlib.util.find_spec('nidaqmx')
+                if nidaqmx_spec is None:
+                    st.session_state.mode_error = "NI-DAQmx software not installed"
+                    st.session_state.process_mode = "simulator"
+                    st.rerun()
+                    return
+                
+                # Check for available devices
                 import nidaqmx
                 devices = nidaqmx.system.System.local().devices
                 if not devices:
-                    st.sidebar.error("No DAQ devices found!")
+                    st.session_state.mode_error = "No DAQ devices found"
                     st.session_state.process_mode = "simulator"
-                else:
-                    st.session_state.process_mode = mode
-                    st.sidebar.success(f"Found DAQ device: {devices[0].name}")
-            except ImportError:
-                st.sidebar.warning("Couldn't connect to DAQ hardware! Staying in simulator mode.")
+                    st.rerun()
+                    return
+                    
+                # Success case
+                st.session_state.process_mode = "DAQ hardware"
+                st.session_state.mode_error = None  # Clear any previous error
+                st.sidebar.success(f"Found DAQ device: {devices[0].name}")
+                
+            except Exception as e:
+                st.session_state.mode_error = f"DAQ Error: {str(e)}"
                 st.session_state.process_mode = "simulator"
+                st.rerun()
+                return
+
+    # Show current mode and error context if any
+    if st.session_state.process_mode == "simulator":
+        if st.session_state.mode_error:
+            st.sidebar.warning(f"Running in simulator mode: {st.session_state.mode_error}")
         else:
-            st.session_state.process_mode = mode
+            st.sidebar.info("Running in simulator mode")
+    else:
+        st.sidebar.success("Running in DAQ hardware mode")
 
     # Start/Stop Control (Available for all users)
     st.sidebar.header("Click Twice to Start/Stop")
