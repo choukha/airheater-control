@@ -65,32 +65,40 @@ class AirHeaterSimulator:
         self.heater.noise_std = noise_std
         self.filter.Tf = filter_tf
         
-    def simulate_step(self) -> Tuple[float, float, float]:
+    def simulate_step(self):
         """Run one simulation step
         
         Returns:
             Tuple containing (temperature, filtered_temperature, control_signal)
         """
-        # Get current temperature
-        current_temp = self.heater.Tout
+        if not self.is_running:
+            return None, None, None
         
-        # Calculate control signal
-        control_signal = self.controller.update(self.setpoint, current_temp)
-        
-        # Update process
-        temperature = self.heater.update(control_signal)
-        
-        # Filter measurement
-        filtered_temp = self.filter.update(temperature)
-        
-        # Store in database
-        self.db.store_measurement(
-            temperature=temperature,
-            filtered_temp=filtered_temp,
-            control_signal=control_signal,
-            setpoint=self.setpoint,
-            kp=self.controller.Kp,
-            ti=self.controller.Ti
-        )
-        
-        return temperature, filtered_temp, control_signal
+        try:
+            # Get current temperature
+            current_temp = self.heater.Tout
+            
+            # Calculate control signal
+            control_signal = self.controller.update(self.setpoint, current_temp)
+            
+            # Update process
+            temperature = self.heater.update(control_signal)
+            
+            # Filter measurement
+            filtered_temp = self.filter.update(temperature)
+            
+            # Store in database
+            self.db.store_measurement(
+                temperature=temperature,
+                filtered_temp=filtered_temp,
+                control_signal=control_signal,
+                setpoint=self.setpoint,
+                kp=self.controller.Kp,
+                ti=self.controller.Ti
+            )
+            
+            return temperature, filtered_temp, control_signal
+        except Exception as e:
+            print(f"Simulation error: {e}")
+            self.is_running = False
+            return None, None, None

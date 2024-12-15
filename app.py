@@ -26,6 +26,13 @@ if 'initialized' not in st.session_state:
     st.session_state.is_running = False
     st.session_state.display_minutes = 1.0
 
+if 'simulation_status' not in st.session_state:
+    st.session_state.simulation_status = {
+        'last_update': time.time(),
+        'update_count': 0,
+        'error_count': 0
+    }
+
 def login_page():
     """Display login page"""
     st.title("Air Heater Control System - Login")
@@ -140,16 +147,30 @@ def create_sidebar():
     else:
         st.sidebar.success("Running in DAQ hardware mode")
 
-    # Start/Stop Control (Available for all users)
-    st.sidebar.header("Click Twice to Start/Stop")
-    if st.session_state.simulator.is_running():
-        if st.sidebar.button("🛑 STOP", key="stop_button"):
-            st.session_state.simulator.stop()
-            st.session_state.is_running = False
-    else:
-        if st.sidebar.button("✅ START", key="start_button"):
-            st.session_state.simulator.start()
-            st.session_state.is_running = True
+    # Start/Stop Control with better responsiveness
+    st.sidebar.header("Process Control")
+    if 'is_running' not in st.session_state:
+        st.session_state.is_running = False
+
+    control_col1, control_col2 = st.sidebar.columns([3, 1])
+    with control_col1:
+        if st.session_state.is_running:
+            if st.button("🛑 STOP", key="stop_btn", type="secondary", use_container_width=True):
+                st.session_state.is_running = False
+                st.session_state.simulator.stop()
+                st.rerun()
+        else:
+            if st.button("▶️ START", key="start_btn", type="primary", use_container_width=True):
+                st.session_state.is_running = True
+                st.session_state.simulator.start()
+                st.rerun()
+
+    # Show running status indicator
+    with control_col2:
+        if st.session_state.is_running:
+            st.markdown("🟢 Running")
+        else:
+            st.markdown("⚫ Stopped")
 
     # Display window options
     st.sidebar.header("Display Settings")
@@ -193,43 +214,57 @@ def simulation_update_fragment():
         st.session_state.filtered_temperature = filtered_temp
         st.session_state.control_signal = control
 
-@st.fragment(run_every=10)
+@st.fragment(run_every=5)
 def plot_and_metrics_fragment():
     """Real-time plot and metrics updates"""
     st.header("Air Heater Control")
+
+    # Create metrics layout first - always show the container
+    metrics_cols = st.columns(4)
+    
     if st.session_state.is_running:
-        col1, col2, col3, col4 = st.columns(4)
-        plot_placeholder = st.empty()
-        
-        # Fetch and display data
-        df = st.session_state.db.get_recent_data(minutes=st.session_state.display_minutes)
-        latest_values = st.session_state.db.get_latest_values()
+        try:
+            # Get latest data
+            df = st.session_state.db.get_recent_data(minutes=st.session_state.display_minutes)
+            latest_values = st.session_state.db.get_latest_values()
 
-        temperature = float(st.session_state.get("temperature", latest_values.get("temperature", 0.0)))
-        filtered_temperature = float(st.session_state.get("filtered_temperature", latest_values.get("temperature_filtered", 0.0)))
-        control_signal = float(st.session_state.get("control_signal", latest_values.get("control_signal", 0.0)))
-        setpoint = float(st.session_state.get("setpoint", latest_values.get("setpoint", 25.0)))
+            if latest_values is not None and not latest_values.empty:
+                # Extract and format values
+                temperature = latest_values['temperature'].iloc[0]
+                filtered_temp = latest_values['temperature_filtered'].iloc[0]
+                control_signal = latest_values['control_signal'].iloc[0]
+                setpoint = latest_values['setpoint'].iloc[0]
 
-        with col1:
-            st.metric("Temperature", f"{temperature:.1f}°C")
-        with col2:
-            st.metric("Filtered Temperature", f"{filtered_temperature:.1f}°C")
-        with col3:
-            st.metric("Control Signal", f"{control_signal:.2f}V")
-        with col4:
-            st.metric("Setpoint", f"{setpoint:.1f}°C")
+                # Update metrics in fixed containers
+                with metrics_cols[0]:
+                    st.metric("Temperature", f"{temperature:.1f}°C")
+                with metrics_cols[1]:
+                    st.metric("Filtered Temperature", f"{filtered_temp:.1f}°C")
+                with metrics_cols[2]:
+                    st.metric("Control Signal", f"{control_signal:.2f}V")
+                with metrics_cols[3]:
+                    st.metric("Setpoint", f"{setpoint:.1f}°C")
 
-        if not df.empty:
-            fig = create_process_plots(
-                x_values=df["timestamp"].values,
-                temp_data=df["temperature"].values,
-                filtered_temp_data=df["temperature_filtered"].values,
-                control_data=df["control_signal"].values,
-                setpoint_data=df["setpoint"].values,
-            )
-            plot_placeholder.plotly_chart(fig, use_container_width=True)
+                # Create plots only if we have data
+                if not df.empty:
+                    # Temperature plot
+                    st.subheader("Temperature Response")
+                    fig1 = create_process_plots(df)
+                    st.plotly_chart(fig1, use_container_width=True)
+            else:
+                # Show placeholders when no data
+                for col in metrics_cols:
+                    with col:
+                        st.metric("--", "--")
+                st.info("Waiting for data...")
+        except Exception as e:
+            st.error(f"Error updating display: {str(e)}")
     else:
-        st.write("Run the Process to collect data. START/STOP Button on Top Left side")
+        # Show empty metrics when stopped
+        for col in metrics_cols:
+            with col:
+                st.metric("--", "--")
+        st.info("Process is stopped. Click START to begin data collection.")
 
 @st.fragment(run_every=5)
 def data_management_fragment():
