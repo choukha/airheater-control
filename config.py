@@ -1,8 +1,5 @@
 # config.py
 
-# Database settings
-DB_PATH = "airheater.db"
-
 # Default controller settings
 DEFAULT_SETTINGS = {
     'Kp': 2.0,
